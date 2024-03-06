@@ -35,6 +35,7 @@ const wagmiConfig = createConfig({
   publicClient
 })
 import Mint from './components/Mint.jsx';
+import Upload from './components/Upload.jsx';
 
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -51,6 +52,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         <Route path="/deployments/:collectionId" element={<AdminInteract />} />
         <Route path="/mint" element={<Mint />} />
         <Route path="*" element={<Notfound />} />
+        <Route path="/upload" element={<Upload />} />
       </Routes>
       </RainbowKitProvider>
     </WagmiConfig>

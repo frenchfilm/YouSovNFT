@@ -1,6 +1,6 @@
 // Public Minting Page
 
-import React from "react";
+import React, { useEffect } from "react";
 import Navbar from "./Navbar";
 import {
   useAccount,
@@ -15,9 +15,7 @@ import {
 } from "../constants/constants";
 
 function Mint() {
-  const {
-    data: NFTInstances,
-  } = useContractRead({
+  const { data: NFTInstances } = useContractRead({
     address: NFTCollectionFactoryAddress,
     abi: NFTCollectionFactoryABI,
     functionName: "geteSovInstances",
@@ -26,7 +24,7 @@ function Mint() {
   return (
     <div className="flex flex-col items-center mt-4">
       <Navbar />
-      <div className="flex flex-col items-center mt-4">
+      <div className="grid grid-cols-3 gap-4 p-4">
         {NFTInstances?.length === 0 ? (
           <div>No collections found.</div>
         ) : (
@@ -86,7 +84,6 @@ const MintCard = ({ collectionId }) => {
     functionName: "flowRate",
   });
 
-
   const { data: currentFlowRate } = useContractRead({
     address: collectionId,
     abi: NFTCollectionABI,
@@ -106,8 +103,20 @@ const MintCard = ({ collectionId }) => {
     functionName: "getCurrentTokenId",
   });
 
-  const canMintNFTs = duxBalance > 0 && currentFlowRate < maxPerWallet*flowrate;
+  const { data: maxStreamsPerWallet } = useContractRead({
+    address: collectionId,
+    abi: NFTCollectionABI,
+    functionName: "maxStreamsPerWallet",
+  });
 
+  const canMintNFTs = duxBalance > 0 && (maxPerWallet <= 0 || userBalance < maxPerWallet);
+
+
+  useEffect(() => {
+    // print user balance and max per wallet
+    console.log("User balance: ", userBalance?.toString());
+    console.log("Max per wallet: ", maxPerWallet?.toString());
+  }, [maxStreamsPerWallet]);
 
   const generateMetadata = async () => {
     const obj = {};
@@ -121,9 +130,8 @@ const MintCard = ({ collectionId }) => {
     const ctx = canvas.getContext("2d");
     canvas.width = 100;
     canvas.height = 100;
-    ctx.fillStyle = `rgb(${Math.random() * 255}, ${Math.random() * 255}, ${
-      Math.random() * 255
-    })`;
+    ctx.fillStyle = `rgb(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255
+      })`;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Convert the canvas to a Blob
@@ -131,7 +139,7 @@ const MintCard = ({ collectionId }) => {
       const formData = new FormData();
       formData.append("image", blob, "nft-image.png");
       formData.append("contractAddress", collectionId.toLowerCase());
-      formData.append("tokenId", currentTokenId.toString());
+      formData.append("tokenId", currentTokenId?.toString());
 
       // Append other attributes
       Object.entries(obj).forEach(([key, value]) => {
@@ -168,31 +176,54 @@ const MintCard = ({ collectionId }) => {
           target="_blank"
           rel="noopener noreferrer"
         >
-          <p className="text-xl text-gray-600">{collectionId}</p>
+          <p className="text text-gray-600">{collectionId}</p>
         </a>
 
-        {canMintNFTs ? (
-          <p className="text-lg text-gray-600 mt-4 mr-2">You can mint!</p>
-        ) : duxBalance > 0 ? (
-          <p className="text-lg text-gray-600 mt-4 mr-2">
-            Reached max stream per wallet limit but can still mint !!
-          </p>
+        {duxBalance > 0 ? (
+          maxPerWallet > 0 && userBalance < maxPerWallet ? (
+            <p className="text-lg text-gray-600 mt-4 mr-2">
+              Reached max NFT limit per wallet!
+            </p>
+          ) : canMintNFTs && (
+            <div>
+              {userBalance < maxStreamsPerWallet ? (
+                <p className="text-lg text-gray-600 mt-4 mr-2">You can mint!</p>
+              ) : (
+                <p className="text-lg text-gray-600 mt-4 mr-2">
+                  Reached max stream per wallet limit but can still mint
+                </p>
+              )}
+            </div>
+
+          )
         ) : (
-          <p className="text-lg text-gray-600 mt-4 mr-2">
-            You can't mint NFTs as contract has no DUX !
-          </p>
+
+          flowrate?.toString() > 0 ? (
+            <p className="text-lg text-gray-600 mt-4 mr-2">
+              The contract is not funded with DUX
+            </p>
+          ) : (
+            <p className="text-lg text-gray-600 mt-4 mr-2">
+              These NFTs have no stream
+            </p>
+          )
+
+
+
+
         )}
       </div>
       <div className="mt-4 border p-4 rounded-lg relative">
         <div className="flex flex-row">
           <p className="text-xl text-gray-600">Mint</p>
           <p className="text-xl text-gray-600 ml-2">
-            {imageSourceType &&
-              {
-                0: "RandomFromSet",
-                1: "SinglePreset",
-                2: "Generated PFP",
-              }[imageSourceType.toString()]}
+            {imageSourceType === 0
+              ? "RandomFromSet"
+              : imageSourceType === 1
+                ? "SinglePreset"
+                : imageSourceType === 2
+                  ? "Generated PFP"
+                  : null}
           </p>
         </div>
 
@@ -208,13 +239,19 @@ const MintCard = ({ collectionId }) => {
         </p>
         <p className="text-lg text-gray-600 mt-4">
           Max Stream per wallet:{" "}
-          {maxPerWallet && flowrate
+          {maxStreamsPerWallet && flowrate
             ? Math.round(
-                maxPerWallet.toString() *
-                  ((flowrate.toString() * 604800) / 1e16)
-              ) / 100
+              maxStreamsPerWallet.toString() *
+              ((flowrate.toString() * 604800) / 1e16)
+            ) / 100
             : 0}{" "}
           DUX per week
+        </p>
+        <p className="text-lg text-gray-600 mt-4">
+          Your balance: {userBalance ? userBalance.toString() : 0}
+        </p>
+        <p className="text-lg text-gray-600 mt-4">
+          Max per wallet: {maxPerWallet ? maxPerWallet.toString() : 0}
         </p>
         <div className="flex flex-row justify-between">
           <p className="text-lg text-gray-600 mt-4">
@@ -225,10 +262,9 @@ const MintCard = ({ collectionId }) => {
 
         <button
           onClick={() => generateMetadataandMint()}
-          className={`absolute top-0 right-0 mt-2 mr-2 bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded ${
-            !(duxBalance > 0) ? "opacity-50 cursor-not-allowed" : ""
-          }`}
-          disabled={!(duxBalance > 0)}
+          className={`absolute top-0 right-0 mt-2 mr-2 bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded ${(!canMintNFTs &&flowrate!=0) ? "opacity-50 cursor-not-allowed" : ""
+            }`}
+          disabled={!canMintNFTs && flowrate!=0}
         >
           Mint
         </button>

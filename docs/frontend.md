@@ -28,6 +28,7 @@
 - **Description**: Provides functionalities for minting NFTs.
 - **Props**: None.
 - **Functionality**:
+  - Takes tokenURI as an input
   - Allows admin to perform actions like admin mint and batch mint.
   - Displays minting status and errors if any.
 

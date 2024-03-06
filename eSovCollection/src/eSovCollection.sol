@@ -6,8 +6,9 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import {ISuperfluid, ISuperToken} from "@superfluid-finance/contracts/interfaces/superfluid/ISuperfluid.sol";
 import {SuperTokenV1Library} from "@superfluid-finance/contracts/apps/SuperTokenV1Library.sol";
+import "@openzeppelin/contracts/interfaces/IERC2981.sol";
 
-contract eSovCollection is ERC721Enumerable, Ownable {
+contract eSovCollection is ERC721Enumerable, IERC2981, Ownable {
     using SuperTokenV1Library for ISuperToken;
 
     enum ImageSourceType {
@@ -21,31 +22,25 @@ contract eSovCollection is ERC721Enumerable, Ownable {
     uint256 public immutable specialMintPrice;
     uint256 public immutable batchMintAmount;
     uint256 public immutable maxPerWallet;
-    uint256 public immutable maxTotalSupply;
+    uint256 public immutable maxStreamsPerWallet;
+    uint256 public maxTotalSupply;
     ImageSourceType public immutable imageSource;
     bool public immutable isSBT;
     uint8 public immutable specialCode;
     int96 public immutable flowRate;
+    uint96 public royaltyPercentage;
+    address public royalityReceiver;
 
     ISuperToken public immutable dux;
 
     string[] public _collectionAttributes;
     address[] private addressList;
     uint256 private _currentTokenId = 0;
+    uint256 public _currentSeason = 1;
 
-    // Metadata URIs
-
-    string private constant presetMetadataURI =
-        "https://demotokenuri.fly.dev/metadata/single_image";
-    string private constant baseDynamicMetadataURI =
-        "https://demotokenuri.fly.dev/metadata/pfps/";
-    string[5] private metadataURIs = [
-        "https://demotokenuri.fly.dev/metadata/presets/image1",
-        "https://demotokenuri.fly.dev/metadata/presets/image2",
-        "https://demotokenuri.fly.dev/metadata/presets/image3",
-        "https://demotokenuri.fly.dev/metadata/presets/image4",
-        "https://demotokenuri.fly.dev/metadata/presets/image5"
-    ];
+    // Mappings
+    mapping(uint256 => bool) private _tokenHasStream;
+    mapping(uint256 => string) private tokenURIs;
 
     // Struct to store configuration for the eSov NFTCollection
 
@@ -56,12 +51,15 @@ contract eSovCollection is ERC721Enumerable, Ownable {
         uint256 specialMintPrice;
         uint256 batchMintAmount;
         uint256 maxPerWallet;
+        uint256 maxStreamsPerWallet;
         uint256 maxTotalSupply;
         ImageSourceType imageSource;
         bool isSBT;
         uint8 specialCode;
         int96 flowRate;
         string[] collectionAttributes;
+        uint96 royaltyPercentage;
+        address royalityReceiver;
     }
 
     /**
@@ -76,16 +74,23 @@ contract eSovCollection is ERC721Enumerable, Ownable {
         address _owner,
         ISuperToken _dux
     ) ERC721(config._name, config._symbol) Ownable() {
+        require(
+            config.royaltyPercentage <= 100,
+            "Royalty percentage cannot be more than 100"
+        );
         mintPrice = config.mintPrice;
         specialMintPrice = config.specialMintPrice;
         batchMintAmount = config.batchMintAmount;
         maxPerWallet = config.maxPerWallet;
+        maxStreamsPerWallet = config.maxStreamsPerWallet;
         maxTotalSupply = config.maxTotalSupply;
         imageSource = config.imageSource;
         isSBT = config.isSBT;
         specialCode = config.specialCode;
         flowRate = config.flowRate;
+        royaltyPercentage = config.royaltyPercentage;
         _collectionAttributes = config.collectionAttributes;
+        royalityReceiver = config.royalityReceiver;
         transferOwnership(_owner); // Transfer ownership to the owner of the factory contract
         require(
             address(_dux) != address(0),
@@ -100,31 +105,55 @@ contract eSovCollection is ERC721Enumerable, Ownable {
      * @dev Allows users to mint a new token and get a Superfluid stream.
      * @notice Requires payment of `mintPrice` and adherence to the max total supply.
      */
-    function mint() public payable {
-        require(
-            _currentTokenId + 1 <= maxTotalSupply,
-            "Exceeds max total supply"
-        );
-        require(msg.value == mintPrice, "Insufficient funds");
-        _safeMint(msg.sender, _currentTokenId++);
-        int96 existingFlowRate = getCurrentFlowRate(msg.sender);
-        int96 maxPerWalletFlowRate = int96(int256(maxPerWallet)) * flowRate;
-        if (existingFlowRate < maxPerWalletFlowRate) {
-            _createStream(msg.sender);
+    function mint(string memory _tokenURI) public payable {
+        if (maxTotalSupply != 0) {
+            if (imageSource != ImageSourceType.Dynamic) {
+                require(
+                    _currentTokenId + 1 <= maxTotalSupply,
+                    "Exceeds max total supply"
+                );
+            }
+            if (imageSource == ImageSourceType.Dynamic) {
+                if (_currentTokenId + 1 > maxTotalSupply * _currentSeason) {
+                    _currentSeason++;
+                    _currentTokenId = maxTotalSupply * (_currentSeason - 1);
+                }
+            }
         }
+
+        if (maxPerWallet != 0) {
+            require(
+                balanceOf(msg.sender) < maxPerWallet,
+                "Exceeds max per wallet"
+            );
+        }
+
+        require(msg.value == mintPrice, "Insufficient funds");
+        int96 existingFlowRate = getCurrentFlowRate(msg.sender);
+        int96 maxStreamsPerWalletFlowRate = int96(int256(maxStreamsPerWallet)) *
+            flowRate;
+        if (existingFlowRate < maxStreamsPerWalletFlowRate) {
+            _createStream(msg.sender);
+            _tokenHasStream[_currentTokenId] = true;
+        }
+        _setTokenURI(_currentTokenId, _tokenURI);
+        _safeMint(msg.sender, _currentTokenId++);
     }
 
     /**
      * @dev Allows the owner to mint a new token at a special price.
      * @notice Requires payment of `specialMintPrice` and adherence to the max total supply.
      */
-    function adminMint() public payable onlyOwner {
-        require(
-            _currentTokenId + 1 <= maxTotalSupply,
-            "Exceeds max total supply"
-        );
+    function adminMint(string memory _tokenURI) public payable onlyOwner {
+        if (maxTotalSupply != 0) {
+            require(
+                _currentTokenId + 1 <= maxTotalSupply,
+                "Exceeds max total supply"
+            );
+        }
         require(msg.value == specialMintPrice, "Insufficient funds");
-
+        _tokenHasStream[_currentTokenId] = true;
+        _setTokenURI(_currentTokenId, _tokenURI);
         _safeMint(owner(), _currentTokenId++);
         _createStream(owner());
     }
@@ -133,34 +162,32 @@ contract eSovCollection is ERC721Enumerable, Ownable {
      * @dev Allows the owner to mint multiple tokens at once.
      * @notice Requires payment of `specialMintPrice` per token and adherence to the max total supply.
      */
-    function batchMint() public payable onlyOwner {
+    function batchMint(string[] memory _tokenURIs) public payable onlyOwner {
         require(batchMintAmount > 0, "Number of tokens cannot be zero");
         require(
-            _currentTokenId + batchMintAmount <= maxTotalSupply,
-            "Exceeds max total supply"
+            _tokenURIs.length == batchMintAmount,
+            "Number of token URIs does not match batchMintAmount"
         );
+        if (maxTotalSupply != 0) {
+            require(
+                _currentTokenId + batchMintAmount <= maxTotalSupply,
+                "Exceeds max total supply"
+            );
+        }
+
         require(
             msg.value == specialMintPrice * batchMintAmount,
             "Insufficient funds"
         );
 
         for (uint256 i = 0; i < batchMintAmount; i++) {
+            _tokenHasStream[_currentTokenId] = true;
+            _setTokenURI(_currentTokenId, _tokenURIs[i]);
             _safeMint(owner(), _currentTokenId++);
         }
         _createBatchStream(owner());
     }
 
-    /**
-     * @dev Allows the owner to deposit dux into the contract for streaming.
-     * @param amount The amount of dux to deposit.
-     */
-    function gainDux(uint256 amount) external onlyOwner {
-        // Transfer dux from the owner to the contract
-        require(
-            dux.transferFrom(msg.sender, address(this), amount),
-            "dux transfer failed"
-        );
-    }
 
     /**
      * @dev Allows the owner to withdraw dux from the contract.
@@ -205,6 +232,37 @@ contract eSovCollection is ERC721Enumerable, Ownable {
         }
     }
 
+    /**
+     * @dev Restarts an Superfluid stream to a given address.
+     * @param streamAddress The address of the stream recipient.
+     * @notice Only callable by the owner.
+     */
+    function reStartStream(address streamAddress) external onlyOwner {
+        _reStartStream(streamAddress);
+    }
+
+    /**
+     * @dev Restarts Superfluid streams initiated by this contract.
+     * @notice Only callable by the owner.
+     */
+
+    function reStartAllStreams() external onlyOwner {
+        for (uint256 i = 0; i < addressList.length; i++) {
+            address streamAddress = addressList[i];
+            _reStartStream(streamAddress);
+        }
+    }
+
+    // EIP-2981 royalty info for marketplaces
+    function royaltyInfo(
+        uint256 /* tokenId */,
+        uint256 salePrice
+    ) external view override returns (address receiver, uint256 royaltyAmount) {
+        receiver = royalityReceiver;
+        royaltyAmount = (salePrice * royaltyPercentage) / 100; // Using the dynamic value for all tokens
+        return (receiver, royaltyAmount);
+    }
+
     // Public functions
 
     /**
@@ -242,7 +300,70 @@ contract eSovCollection is ERC721Enumerable, Ownable {
         return _currentTokenId;
     }
 
+    /**
+     * @dev Retrieves the current season.
+     * @return The current season in the contract.
+     * @notice Only applicable for Dynamic image source.
+     * @notice The season starts from 1.
+     */
+
+    function getCurrentSeason() public view returns (uint256) {
+        return _currentSeason;
+    }
+
+    /**
+     * @dev Retrieves whether a token has a Superfluid stream.
+     * @param tokenId The ID of the token.
+     * @return A boolean indicating whether the token has a stream.
+     */
+    function tokenHasStream(uint256 tokenId) public view returns (bool) {
+        return _tokenHasStream[tokenId];
+    }
+
+    /**
+     * @dev Retrieves the token URI for a given token ID.
+     * @param tokenId The ID of the token.
+     * @return The URI of the token.
+     */
+    function tokenURI(
+        uint256 tokenId
+    ) public view override returns (string memory) {
+        require(
+            _exists(tokenId),
+            "ERC721Metadata: URI query for nonexistent token"
+        );
+        return tokenURIs[tokenId];
+    }
+
+    /**
+     * @dev Retrieves the token Ids for a given owner.
+     * @param owner The address of the owner.
+     * @return An array of strings representing the URIs of the tokens owned by the given address.
+     */
+    function tokensOfOwner(address owner)
+        public
+        view
+        returns (uint256[] memory)
+    {
+        uint256 tokenCount = balanceOf(owner);
+        uint256[] memory result = new uint256[](tokenCount);
+        for (uint256 i = 0; i < tokenCount; i++) {
+            result[i] = tokenOfOwnerByIndex(owner, i);
+        }
+        return result;
+    }
+
     // Internal functions
+
+    /**
+     * @dev Internal function to set the token URI.
+     * @param tokenId The ID of the token.
+     * @param _tokenURI The URI of the token.
+     */
+
+    function _setTokenURI(uint256 tokenId, string memory _tokenURI) internal {
+        tokenURIs[tokenId] = _tokenURI;
+    }
 
     /**
      * @dev Internal function to create a Superfluid stream.
@@ -250,6 +371,9 @@ contract eSovCollection is ERC721Enumerable, Ownable {
      */
 
     function _createStream(address to) internal {
+        if (flowRate == 0) {
+            return;
+        }
         int96 existingFlowRate = getCurrentFlowRate(to);
         bool success;
 
@@ -257,7 +381,6 @@ contract eSovCollection is ERC721Enumerable, Ownable {
             // If there's no existing flow, create a new one
             success = dux.createFlow(to, flowRate);
             require(success, "Flow creation failed");
-
             addressList.push(to);
         } else {
             // If there's an existing flow, update it by adding the new flowRate
@@ -272,6 +395,9 @@ contract eSovCollection is ERC721Enumerable, Ownable {
      * @param to The address to which the stream is created.
      */
     function _createBatchStream(address to) internal {
+        if (flowRate == 0) {
+            return;
+        }
         int96 existingFlowRate = getCurrentFlowRate(to);
         bool success;
 
@@ -303,6 +429,50 @@ contract eSovCollection is ERC721Enumerable, Ownable {
         dux.deleteFlow(address(this), streamAddress);
     }
 
+    /*
+    Internal function to retrive the restart index for a given address
+     */
+
+    function _getRestartIndex(
+        address streamAddress
+    ) public view returns (uint256) {
+        if (streamAddress == owner()) {
+            return balanceOf(streamAddress);
+        } else {
+            uint256 balance = balanceOf(streamAddress);
+            uint256 _restartIndex = 0;
+            for (uint256 i = 0; i < balance; i++) {
+                uint256 tokenId = tokenOfOwnerByIndex(streamAddress, i);
+                if (_tokenHasStream[tokenId]) {
+                    _restartIndex++;
+                }
+            }
+            return _restartIndex;
+        }
+    }
+
+    /**
+     * @dev Internal function to restart a Superfluid stream.
+     * @param streamAddress The address of the stream recipient.
+     */
+
+    function _reStartStream(address streamAddress) internal {
+        if (flowRate == 0) {
+            return;
+        }
+        uint256 restartIndex = _getRestartIndex(streamAddress);
+
+        // Multiply flowRate by restartIndex
+        int96 flowAmount = int96(flowRate * int256(restartIndex));
+
+        // Create flow only if restartIndex is non-zero
+        if (flowAmount > 0) {
+            // Assuming dux.createFlow returns a boolean indicating success
+            bool flowCreated = dux.createFlow(streamAddress, flowAmount);
+            require(flowCreated, "Flow creation failed");
+        }
+    }
+
     // override functions
 
     // Overriding all transfer functions for managing streams accordingly
@@ -313,7 +483,7 @@ contract eSovCollection is ERC721Enumerable, Ownable {
         uint256 tokenId
     ) public override(ERC721, IERC721) {
         require(!isSBT, "Soulbound Tokens cannot be transferred");
-        _beforeTokenTransfer(from, to);
+        _beforeTokenTransfer(from, to, tokenId);
         super.transferFrom(from, to, tokenId);
     }
 
@@ -332,7 +502,7 @@ contract eSovCollection is ERC721Enumerable, Ownable {
         bytes memory _data
     ) public override(ERC721, IERC721) {
         require(!isSBT, "Soulbound Tokens cannot be transferred");
-        _beforeTokenTransfer(from, to);
+        _beforeTokenTransfer(from, to, tokenId);
         super.safeTransferFrom(from, to, tokenId, _data);
     }
 
@@ -343,68 +513,46 @@ contract eSovCollection is ERC721Enumerable, Ownable {
      * @notice Overrides the ERC721 `_beforeTokenTransfer` method.
      */
 
-    function _beforeTokenTransfer(address from, address to) internal {
-        int96 fromFlowRate = getCurrentFlowRate(from);
-        int96 toFlowRate = getCurrentFlowRate(to);
-
-        // Adjust the flow rate for the sender
-        if (fromFlowRate == flowRate) {
-            dux.deleteFlow(address(this), from);
-        } else if (fromFlowRate > flowRate) {
-            dux.updateFlow(from, fromFlowRate - flowRate);
-        }
-
-        // Adjust the flow rate for the receiver
-        if (fromFlowRate != 0) {
-            if (toFlowRate > 0) {
-                if (toFlowRate < int96(int256(maxPerWallet)) * flowRate) {
-                    dux.updateFlow(to, toFlowRate + flowRate);
-                }
-            } else {
-                _createStream(to);
-            }
-        }
-    }
-
-    /**
-     * @dev Returns the URI for a given token ID.
-     * @param tokenId The ID of the token.
-     * @return A string representing the metadata URI.
-     * @notice Overrides the ERC721 `tokenURI` method.
-     */
-
-    function tokenURI(
+    function _beforeTokenTransfer(
+        address from,
+        address to,
         uint256 tokenId
-    ) public view override returns (string memory) {
+    ) internal {
         require(
             _exists(tokenId),
-            "ERC721Metadata: URI query for nonexistent token"
+            "ERC721: operator query for nonexistent token"
         );
+        if (maxPerWallet != 0) {
+            require(balanceOf(to) < maxPerWallet, "Exceeds max per wallet");
+        }
+        if (flowRate == 0) {
+            return;
+        }
+        if (_tokenHasStream[tokenId]) {
+            // If the token has a stream
+            int96 fromFlowRate = getCurrentFlowRate(from);
+            int96 toFlowRate = getCurrentFlowRate(to);
 
-        // Handle different image source types
-        if (imageSource == ImageSourceType.RandomFromSet) {
-            // Select a random URI from the set
-            uint256 randomIndex = uint256(
-                keccak256(abi.encodePacked(tokenId))
-            ) % metadataURIs.length;
-            return metadataURIs[randomIndex];
-        } else if (imageSource == ImageSourceType.SinglePreset) {
-            // Return the preset URI
-            return presetMetadataURI;
-        } else if (imageSource == ImageSourceType.Dynamic) {
-            // Construct a dynamic URI
-            return
-                string(
-                    abi.encodePacked(
-                        baseDynamicMetadataURI,
-                        Strings.toHexString(uint160(address(this)), 20),
-                        "/",
-                        Strings.toString(tokenId)
-                    )
-                );
-        } else {
-            // Default case, if needed
-            return "";
+            // Adjust the flow rate for the sender
+            if (fromFlowRate == flowRate) {
+                dux.deleteFlow(address(this), from);
+            } else if (fromFlowRate > flowRate) {
+                dux.updateFlow(from, fromFlowRate - flowRate);
+            }
+
+            // Adjust the flow rate for the receiver
+            if (fromFlowRate != 0) {
+                if (toFlowRate > 0) {
+                    if (
+                        toFlowRate <
+                        int96(int256(maxStreamsPerWallet)) * flowRate
+                    ) {
+                        dux.updateFlow(to, toFlowRate + flowRate);
+                    }
+                } else {
+                    _createStream(to);
+                }
+            }
         }
     }
 }

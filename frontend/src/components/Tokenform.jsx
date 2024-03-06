@@ -5,32 +5,32 @@ import {
   NFTCollectionFactoryAddress,
   NFTCollectionFactoryABI,
 } from "../constants/constants";
+import { useEffect } from "react";
+import { useWaitForTransaction } from "wagmi";
+import { Link } from "react-router-dom";
 
 const MintingOptionsForm = () => {
+  const [collectionName, setCollectionName] = useState("");
+  const [collectionSymbol, setCollectionSymbol] = useState("");
   const [mintPrice, setMintPrice] = useState(0);
-  const [specialMintPrice, setSpecialMintPrice] = useState(0);
+  const [specialMintPrice, setSpecialMintPrice] = useState();
   const [batchMintAmount, setBatchMintAmount] = useState();
-  const [maxPerWallet, setMaxPerWallet] = useState();
-  const [maxTotalSupply, setMaxTotalSupply] = useState();
-  const [imageSource, setImageSource] = useState(); // Assuming 0 as default
+  const [maxPerWallet, setMaxPerWallet] = useState(0);
+  const [maxStreamsPerWallet, setmaxStreamsPerWallet] = useState();
+  const [maxTotalSupply, setMaxTotalSupply] = useState(0);
+  const [imageSource, setImageSource] = useState();
   const [isSBT, setIsSBT] = useState(false);
-  const [specialCode, setSpecialCode] = useState(); // Assuming 0 as default
+  const [specialCode, setSpecialCode] = useState();
   const [flowRate, setFlowRate] = useState();
   const { address, isConnected } = useAccount();
   const [showTraitsManager, setShowTraitsManager] = useState(false);
+  const [royalityPercent, setRoyalityPercent] = useState(0);
+  const [royalityReceiver, setRoyalityReceiver] = useState("");
 
-  const {
-    write: createCollection,
-    data,
-    error,
-    isLoading,
-  } = useContractWrite({
+  const { writeAsync: createCollection, isLoading, error: creationError } = useContractWrite({
     address: NFTCollectionFactoryAddress,
     abi: NFTCollectionFactoryABI,
     functionName: "createNFTCollection",
-    onSuccess(data) {
-      alert("Collection created successfully");
-    },
   });
 
   const { data: contractOwner, isError } = useContractRead({
@@ -40,8 +40,15 @@ const MintingOptionsForm = () => {
   });
   const [traitValues, setTraitValues] = useState([]);
   const [newTrait, setNewTrait] = useState("");
+  const [transactionHash, setTransactionHash] = useState("");
 
-  const handleSubmit = (event) => {
+  useEffect(() => {
+    if (contractOwner) {
+      setRoyalityReceiver(contractOwner);
+    }
+  }, [contractOwner]);
+
+  const handleSubmit = async (event) => {
     event.preventDefault();
 
     let imageSourceIndex = 0;
@@ -50,10 +57,10 @@ const MintingOptionsForm = () => {
       case "random":
         imageSourceIndex = 0;
         break;
-      case "single":
+      case "preset":
         imageSourceIndex = 1;
         break;
-      case "generative":
+      case "Generative":
         imageSourceIndex = 2;
         break;
       default:
@@ -61,27 +68,37 @@ const MintingOptionsForm = () => {
     }
 
     const config = {
-      _name: "EsovNFTCollection",
-      _symbol: "ESOV",
+      _name: collectionName,
+      _symbol: collectionSymbol,
       mintPrice: mintPrice * 10 ** 18,
       specialMintPrice: specialMintPrice * 10 ** 18,
       batchMintAmount: batchMintAmount,
       maxPerWallet: maxPerWallet,
+      maxStreamsPerWallet: maxStreamsPerWallet,
       maxTotalSupply: maxTotalSupply,
       imageSource: imageSourceIndex,
       isSBT: isSBT,
       specialCode: specialCode.match(/\d+/),
       flowRate: flowRate * 1653439153439,
       collectionAttributes: traitValues,
+      royaltyPercentage: royalityPercent,
+      royalityReceiver: royalityReceiver,
     };
 
     try {
       console.log(config);
-      createCollection({ args: [config] });
+      const tx = await createCollection({ args: [config] });
+      setTransactionHash(tx.hash);
     } catch (err) {
-      console.log(err);
+      console.log("1");
     }
   };
+
+  const { data } = useWaitForTransaction({
+    hash: transactionHash,
+  });
+
+  const [collectionAddress, setCollectionAddress] = useState("");
 
   const [isFree, setIsFree] = useState(false);
   const handleMintTypeChange = (type) => {
@@ -98,6 +115,15 @@ const MintingOptionsForm = () => {
   const removeTrait = (index) => {
     setTraitValues(traitValues.filter((_, i) => i !== index));
   };
+
+
+  useEffect(() => {
+    if (data) {
+      setCollectionAddress(data.logs[0].address);
+    }
+  }, [collectionAddress, data]);
+
+  const [enableRoyality, setEnableRoyality] = useState(false);
 
   return (
     <div className="container mx-auto p-4">
@@ -134,10 +160,52 @@ const MintingOptionsForm = () => {
           </span>
         </div>
       )}
+      {collectionAddress && (
+        <div
+          className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-3"
+          role="alert"
+        >
+          <strong className="font-bold">Collection Created!</strong>
+          <Link
+            to={`/deployments/${collectionAddress}`}
+            className="text-blue-500 hover:underline"
+          >
+            <span className="block sm:inline"> at {collectionAddress}</span>
+          </Link>
+        </div>
+      )}
       <form
         className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4  border-black border"
         onSubmit={handleSubmit}
       >
+        {/* Collection Name */}
+        <div className="flex mb-4 items-center">
+          <label className="block text-gray-700 text-sm font-bold mr-2">
+            Collection Name:
+          </label>
+          <input
+            type="text"
+            className="shadow appearance-none border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            value={collectionName}
+            onChange={(e) => setCollectionName(e.target.value)}
+            placeholder="Enter collection name"
+          />
+        </div>
+
+        {/* Collection Symbol */}
+        <div className="flex mb-4 items-center">
+          <label className="block text-gray-700 text-sm font-bold mr-2">
+            Collection Symbol:
+          </label>
+          <input
+            type="text"
+            className="shadow appearance-none border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            value={collectionSymbol}
+            onChange={(e) => setCollectionSymbol(e.target.value)}
+            placeholder="Enter collection symbol"
+          />
+        </div>
+
         {/* Mint Type */}
         <div className="flex mb-4 items-center">
           <label className="block text-gray-700 text-sm font-bold mr-2">
@@ -178,7 +246,9 @@ const MintingOptionsForm = () => {
                 type="checkbox"
                 className="form-checkbox"
                 checked={isFree}
-                onChange={() => setIsFree(!isFree)}
+                onChange={() => {
+                  setIsFree(!isFree)
+                }}
               />
               <span className="ml-2">Free</span>
             </label>
@@ -220,6 +290,22 @@ const MintingOptionsForm = () => {
             placeholder="Batch mint amount"
           />
         </div>
+        {/* Max Per Wallet */}
+        <div className="flex mb-4 items-center">
+          <label className="block text-gray-700 text-sm font-bold mr-2">
+            Max Per Wallet:
+          </label>
+          <input
+            type="number"
+            className="shadow appearance-none border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            value={maxPerWallet}
+            onChange={(e) => setMaxPerWallet(e.target.value)}
+            placeholder="Enter max per wallet"
+          />
+          {
+            maxPerWallet == 0 && <p className="text-red-600 text-sm">**  indicates that there is no limit on the number of NFTs a single wallet can hold</p>
+          }
+        </div>
 
         {/* Max Total Supply */}
         <div className="flex mb-4 items-center">
@@ -233,6 +319,9 @@ const MintingOptionsForm = () => {
             onChange={(e) => setMaxTotalSupply(e.target.value)}
             placeholder="Enter max total supply"
           />
+          {
+            maxTotalSupply == 0 && <p className="text-red-600 text-sm">**  indicates that there is no limit on the total number of NFTs that can be minted</p>
+          }
         </div>
 
         {/* Image Source */}
@@ -243,17 +332,18 @@ const MintingOptionsForm = () => {
           <select
             className="shadow border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
             value={imageSource}
-            onChange={(e) => setImageSource(e.target.value)}
+            onChange={(e) => {
+              setImageSource(e.target.value);
+            }}
           >
             <option value="">Select Image Source</option>
             <option value="random">Random from a set</option>
-            <option value="single">Single preset JPG</option>
-            <option value="generative">Generative PFP</option>
+            <option value="preset">Single preset JPG</option>
+            <option value="Generative">Generative PFP</option>
           </select>
         </div>
-        {
-          imageSource === "generative" && (
-            <div className="flex mb-4 items-center">
+        {imageSource === "Generative" && (
+          <div className="flex mb-4 items-center">
             <label className="block text-gray-700 text-sm font-bold mr-2">
               Enable Traits:
             </label>
@@ -264,8 +354,7 @@ const MintingOptionsForm = () => {
               onChange={() => setShowTraitsManager(!showTraitsManager)}
             />
           </div>
-          )
-        }
+        )}
         {showTraitsManager && (
           <div style={{ marginLeft: "120px", marginTop: "-40px" }}>
             <div className="flex mb-4 items-center">
@@ -348,7 +437,7 @@ const MintingOptionsForm = () => {
           />
         </div>
 
-        {/* Max Per Wallet */}
+        {/* Max Per Streams Wallet */}
         <div className="flex mb-4 items-center">
           <label className="block text-gray-700 text-sm font-bold mr-2">
             Max Streams per wallet:
@@ -356,11 +445,53 @@ const MintingOptionsForm = () => {
           <input
             type="number"
             className="shadow appearance-none border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            value={maxPerWallet}
-            onChange={(e) => setMaxPerWallet(e.target.value)}
+            value={maxStreamsPerWallet}
+            onChange={(e) => setmaxStreamsPerWallet(e.target.value)}
             placeholder="Enter max streams "
           />
         </div>
+        {/*Enable Royality  */}
+        <div className="flex mb-4 items-center">
+          <label className="block text-gray-700 text-sm font-bold mr-2">
+            Enable Royality:
+          </label>
+          <input
+            type="checkbox"
+            className="form-checkbox"
+            checked={enableRoyality}
+            onChange={() => setEnableRoyality(!enableRoyality)}
+          />
+        </div>
+        {enableRoyality && (
+          <div className="flex mb-4 items-center">
+            <div className="flex mb-4 items-center">
+              <label className="block text-gray-700 text-sm font-bold mr-2">
+                Royality Percentage:
+              </label>
+              <input
+                type="number"
+                className="shadow appearance-none border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                value={royalityPercent}
+                onChange={(e) => setRoyalityPercent(e.target.value)}
+                placeholder="Enter Royality Percentage"
+              />
+            </div>
+            <div className="flex mb-4 items-center ml-4">
+              <label className="block text-gray-700 text-sm font-bold mr-2">
+                Royality Receiver:
+              </label>
+              <input
+                type="text"
+                className="shadow appearance-none border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                value={royalityReceiver}
+                onChange={(e) => setRoyalityReceiver(e.target.value)}
+                placeholder="Enter Royality Receiver Address"
+                size={45}
+              />
+            </div>
+            {royalityReceiver == contractOwner && <p className="text-red-600 text-sm ml-4">**  contractOwner is the default Royality Receiver</p>}
+          </div>
+        )}
 
         {/* Submit Button */}
         <div className="flex justify-end">

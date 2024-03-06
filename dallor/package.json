@@ -11,7 +11,7 @@
 	"dependencies": {
 		"@openzeppelin/contracts": "^4.7.3",
 		"@superfluid-finance/ethereum-contracts": "^1.4.3",
-		"truffle-plugin-verify": "^0.6.0"
+		"truffle-plugin-verify": "^0.6.7"
 	},
 	"devDependencies": {
 		"@decentral.ee/web3-helpers": "^0.5.3",

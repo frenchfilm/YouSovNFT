@@ -28,24 +28,29 @@ function Deployments() {
         {data.length === 0 ? (
           <div>No collections found.</div>
         ) : (
-          data.map((collection) => (
-            <div className="flex flex-col items-center mt-4 ml-4 border border-black">
-            <Card
-              title="Collection Info"
-              content={
-                <div className="flex flex-col items-center mt-4">
-                  <Link
-                    to={`/deployments/${collection}`}
-                    className="text-blue-500 hover:underline"
-                  >
-                    {collection}
-                  </Link>
-                  <ContractInfo collectionId={collection} />
-                </div>
-              }
-            />
-            </div>
-          ))
+          <div className="grid grid-cols-3 gap-4">
+  {data.map((collection) => (
+    <div className="flex flex-col items-center border border-black">
+      <Card
+        title="Collection Info"
+        content={
+          <div className="flex flex-col items-center mt-4">
+            <Link
+              to={`/deployments/${collection}`}
+              className="text-blue-500 hover:underline"
+            >
+              {collection}
+            </Link>
+            <ContractInfo collectionId={collection} />
+          </div>
+        }
+      />
+    </div>
+  ))}
+</div>
+
+          
+
         )}
       </div>
     </div>

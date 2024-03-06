@@ -29,13 +29,21 @@ function Navbar() {
         >
           Deployments
         </Link>
-        <Link
+        {/* <Link
           className={`p-4 bg-white/50 rounded hover:bg-white/70 transition duration-300 ${
             isActive("/mint") ? "underline" : ""
           }`}
           to="/mint"
         >
           Public Mint
+        </Link> */}
+        <Link
+          className={`p-4 bg-white/50 rounded hover:bg-white/70 transition duration-300 ${
+            isActive("/admin") ? "underline" : ""
+          }`}
+          to="/upload"
+        >
+          IPFS helper
         </Link>
         <button className="p-4">
           <ConnectButton />

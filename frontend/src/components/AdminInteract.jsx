@@ -8,7 +8,7 @@ import { useContractRead } from "wagmi";
 import { useEffect, useState } from "react";
 import { useAccount, useBalance } from "wagmi";
 import Streams from "./Superfluid";
-import { DUXAddress, APPROVEDUXABI } from "../constants/constants";
+import { DUXAddress, DUXABI } from "../constants/constants";
 import { ethers } from "ethers";
 
 export const ContractInfo = ({ collectionId }) => {
@@ -64,6 +64,12 @@ export const ContractInfo = ({ collectionId }) => {
     functionName: "getCollectionAttributes",
   });
 
+  const { data: maxStreamsPerWallet } = useContractRead({
+    address: collectionId,
+    abi: NFTCollectionABI,
+    functionName: "maxStreamsPerWallet",
+  });
+
   useEffect(() => {
     // console log all the data here
     console.log("mintPrice", mintPrice);
@@ -108,6 +114,10 @@ export const ContractInfo = ({ collectionId }) => {
         <p>{maxPerWallet?.toString()}</p>
       </div>
       <div>
+        <h3 className="text-lg font-semibold mb-3">Max Streams Per Wallet</h3>
+        <p>{maxStreamsPerWallet?.toString()}</p>
+      </div>
+      <div>
         <h3 className="text-lg font-semibold mb-3">Max Total Supply</h3>
         <p>{maxTotalSupply?.toString()}</p>
       </div>
@@ -118,8 +128,8 @@ export const ContractInfo = ({ collectionId }) => {
           {imageSource?.toString() === "0"
             ? "RandomFromSet"
             : imageSource?.toString() === "1"
-              ? "SinglePreset"
-              : "GenerativePFP"}
+            ? "SinglePreset"
+            : "GenerativePFP"}
         </p>
       </div>
       <div>
@@ -161,13 +171,6 @@ const MintingFunctions = () => {
     functionName: "specialMintPrice",
   });
 
-  const { config: adminMintConfig } = usePrepareContractWrite({
-    address: collectionId,
-    abi: NFTCollectionABI,
-    functionName: "adminMint",
-    value: specialMintPrice ? specialMintPrice.toString() : "0",
-  });
-
   const { data: batchMintAmount } = useContractRead({
     address: collectionId,
     abi: NFTCollectionABI,
@@ -178,30 +181,23 @@ const MintingFunctions = () => {
     writeAsync: adminMint,
     isLoading: isMinting,
     error: mintError,
-  } = useContractWrite(adminMintConfig);
-
-  const { config: adminBatchMintConfig } = usePrepareContractWrite({
+  } = useContractWrite({
     address: collectionId,
     abi: NFTCollectionABI,
-    functionName: "batchMint",
-    value:
-      specialMintPrice && batchMintAmount
-        ? ethers.utils
-          .parseEther(
-            (
-              (specialMintPrice.toString() * batchMintAmount.toString()) /
-              1e18
-            ).toString()
-          )
-          .toString()
-        : "0",
+    functionName: "adminMint",
+    value: specialMintPrice,
   });
 
   const {
     writeAsync: adminBatchMint,
     isLoading: isBatchMinting,
     error: batchMintError,
-  } = useContractWrite(adminBatchMintConfig);
+  } = useContractWrite({
+    address: collectionId,
+    abi: NFTCollectionABI,
+    functionName: "batchMint",
+    value: specialMintPrice * batchMintAmount,
+  });
 
   const {
     data: balance,
@@ -219,7 +215,6 @@ const MintingFunctions = () => {
     abi: NFTCollectionABI,
     functionName: "getduxBalance",
   });
-
 
   const [hasDux, setHasDux] = useState(false);
 
@@ -243,82 +238,70 @@ const MintingFunctions = () => {
 
   const [statusMessage, setStatusMessage] = useState("");
 
-  const generateMetadata = async (_currentTokenId) => {
-    setStatusMessage(`Processing Token ID: ${_currentTokenId}`);
-    const obj = {};
-    attributes.forEach((key) => {
-      obj[key] = Math.random();
-    });
-    console.log(obj);
-
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    canvas.width = 100;
-    canvas.height = 100;
-    ctx.fillStyle = `rgb(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255
-      })`;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Convert the canvas to a Blob
-    canvas.toBlob((blob) => {
-      const formData = new FormData();
-      formData.append("image", blob, "nft-image.png");
-      formData.append("contractAddress", collectionId.toLowerCase());
-      formData.append("tokenId", _currentTokenId);
-
-      // Append other attributes
-      Object.entries(obj).forEach(([key, value]) => {
-        formData.append(key, value);
-      });
-
-      // Send the request to the backend
-      fetch("https://demotokenuri.fly.dev/upload", {
-        method: "POST",
-        body: formData,
-      })
-        .then((response) => response.text())
-        .then((data) => {
-          console.log(data);
-          setStatusMessage(`Token ID: ${_currentTokenId} processed`);
-        })
-        .catch((error) => {
-          console.error("Error submitting image:", error);
-          setStatusMessage(`Error processing Token ID: ${_currentTokenId}`);
-        });
-    }, "image/png");
-  };
-
   const { data: imageSourceType } = useContractRead({
     address: collectionId,
     abi: NFTCollectionABI,
     functionName: "imageSource",
   });
 
+  const { data: flowRate } = useContractRead({
+    address: collectionId,
+    abi: NFTCollectionABI,
+    functionName: "flowRate",
+  });
+
+  // Minting DUX
+
+  const { config: mintDuxConfig } = usePrepareContractWrite({
+    address: DUXAddress,
+    abi: DUXABI,
+    functionName: "mint",
+    args: [address, 1000000 * 1e18, "0x"],
+  });
+
+  const { write: mintDux } = useContractWrite(mintDuxConfig);
+
+  useEffect(() => {
+    if (imageSourceType === 2) {
+      console.log(attributes);
+    }
+  }, [imageSourceType]);
+
+  const [tokenURI, setTokenURI] = useState("");
+
   const handleAdminMint = async () => {
     try {
-      if (imageSourceType === 2) {
-        await generateMetadata(currentTokenId.toString());
-      }
-      await adminMint?.();
+      await adminMint({
+        args: [tokenURI],
+      });
     } catch (error) {
       console.error("Error:", error);
     }
   };
 
+  const [tokenURIs, setTokenURIs] = useState([]);
+
+  // Function to clean up each URL string
+  function cleanUrl(url) {
+    return url.trim().replace(/^'(.*)'$/, "$1");
+  }
+
   const handleBatchMint = async () => {
     try {
-      if (imageSourceType === 2) {
-        const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-        for (let i = currentTokenId; i < currentTokenId + batchMintAmount; i++) {
-          await generateMetadata(i.toString());
-          await delay(1000);
-        }
-      }
-      await adminBatchMint?.();
+      let urls = tokenURIs.map((url) => cleanUrl(url));
+      await adminBatchMint({
+        args: [urls],
+      });
     } catch (error) {
       console.error("Error:", error);
     }
-  }
+  };
+
+  const { data: imageSource } = useContractRead({
+    address: collectionId,
+    abi: NFTCollectionABI,
+    functionName: "imageSource",
+  });
 
   return (
     <div className="flex flex-col items-center gap-4 w-full max-w-xs mx-auto">
@@ -326,21 +309,56 @@ const MintingFunctions = () => {
         <p>Error loading mint price: {specialMintPriceError.message}</p>
       )}
 
+      {/* <div className="flex flex-col items-center gap-4 w-full max-w-xs mx-auto">
+        <h3 className="text-lg font-semibold mb-3">Mint DUX</h3>
+        <button
+          className={`bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded text-center w-full`}
+          onClick={() => mintDux?.()}
+        >
+          Mint 1000000 DUX to your wallet
+        </button>
+      </div> */}
       {balanceError && <p>Error loading balance: {balanceError.message}</p>}
-      {!hasDux && <p>You need to load DUX to mint</p>}
 
+      {flowRate?.toString() != 0 && !hasDux && (
+        <p>You need to load DUX to mint</p>
+      )}
+      <input
+        className="flex-grow py-2 px-3 border rounded border-gray-300"
+        placeholder="Enter token URI"
+        onChange={(e) => setTokenURI(e.target.value)}
+      />
       <button
-        className={`bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded text-center w-full ${!hasDux ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-700"
-          }`}
-        onClick={() => handleAdminMint()}
+        className={`bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded text-center w-full ${
+          flowRate?.toString() != 0 && !hasDux
+            ? "opacity-50 cursor-not-allowed"
+            : "hover:bg-blue-700"
+        }`}
+        onClick={() => {
+          if (tokenURI.length > 0) handleAdminMint();
+          else alert("Token URI cannot be empty");
+        }}
       >
         {isMinting ? "Minting..." : "Admin Mint"}
       </button>
+
       {mintError && <p>Error during minting: {mintError}</p>}
+      <input
+        className="flex-grow py-2 px-3 border rounded border-gray-300"
+        placeholder="Enter token URIs"
+        onChange={(e) => setTokenURIs(e.target.value.split(","))}
+      />
       <button
-        className={`bg-blue-500 text-white font-bold py-2 px-4 rounded w-full ${!hasDux ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-700"
-          }`}
-        onClick={() => handleBatchMint()}
+        className={`bg-blue-500 text-white font-bold py-2 px-4 rounded w-full ${
+          flowRate?.toString() != 0 && !hasDux
+            ? "opacity-50 cursor-not-allowed"
+            : "hover:bg-blue-700"
+        }`}
+        onClick={() => {
+          if (tokenURIs.length > 0)
+             handleBatchMint();
+          else alert("Token URIs cannot be empty");
+        }}
       >
         {isBatchMinting ? "Batch Minting..." : "Batch Mint"}
       </button>
@@ -380,10 +398,10 @@ const FinancialManagement = () => {
   const { config: withdrawEther } = usePrepareContractWrite(
     hasBalance
       ? {
-        address: collectionId,
-        abi: NFTCollectionABI,
-        functionName: "withdrawEther",
-      }
+          address: collectionId,
+          abi: NFTCollectionABI,
+          functionName: "withdrawEther",
+        }
       : undefined
   );
   const { write: withdrawMatic } = useContractWrite(withdrawEther);
@@ -394,7 +412,7 @@ const FinancialManagement = () => {
 
   const { data: approvedDUX } = useContractRead({
     address: DUXAddress,
-    abi: APPROVEDUXABI,
+    abi: DUXABI,
     functionName: "allowance",
     args: [address, collectionId],
   });
@@ -408,39 +426,20 @@ const FinancialManagement = () => {
 
   // console.log(userDuxBalance?.data?.value);
 
-  const { config: approveDUXConfig } = usePrepareContractWrite(
-    approvedDUX < amount * 1e18
-      ? {
-        address: DUXAddress,
-        abi: APPROVEDUXABI,
-        functionName: "approve",
-        args: [collectionId, amount * 1e18],
-        onError: (error) => {
-          console.error("Error:", error);
-          setError(error.message);
-        },
-      }
-      : undefined
+  const { config: transferDUXConfig } = usePrepareContractWrite(
+         {
+          address: DUXAddress,
+          abi: DUXABI,
+          functionName: "transfer",
+          args: [collectionId, amount * 1e18],
+          onError: (error) => {
+            console.error("Error:", error);
+            setError(error.message);
+          },
+        }
   );
 
-  const { write: approveDUX } = useContractWrite(approveDUXConfig);
-
-  const { config: gainDuxConfig } = usePrepareContractWrite(
-    approvedDUX >= amount * 1e18 && userDuxBalance?.data?.value >= amount * 1e18
-      ? {
-        address: collectionId,
-        abi: NFTCollectionABI,
-        functionName: "gainDux",
-        args: [amount * 1e18], // Assuming the amount is in Dux which has 18 decimals
-        onError: (error) => {
-          console.error("Error:", error);
-          setError(error.message);
-        },
-      }
-      : undefined
-  );
-
-  const { write: gainDux } = useContractWrite(gainDuxConfig);
+  const { write: transferDUX } = useContractWrite(transferDUXConfig);
 
   const [withDrawAmount, setWithdrawAmount] = useState("0");
 
@@ -486,11 +485,11 @@ const FinancialManagement = () => {
               />
               <button
                 onClick={() =>
-                  approvedDUX < amount * 1e18 ? approveDUX?.() : gainDux?.()
+                  transferDUX?.()
                 }
                 className="bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded w-1/3"
               >
-                {approvedDUX < amount * 1e18 ? "Approve" : "Load"}
+                Load
               </button>
             </div>
             <h3 className="text-md font-semibold mb-2">Withdraw DUX</h3>
@@ -524,6 +523,12 @@ const AdminDashboard = () => {
     address: collectionId,
     abi: NFTCollectionABI,
     functionName: "owner",
+  });
+
+  const { data: imageSource } = useContractRead({
+    address: collectionId,
+    abi: NFTCollectionABI,
+    functionName: "imageSource",
   });
 
   useEffect(() => {
@@ -560,7 +565,6 @@ const AdminDashboard = () => {
       <Navbar />
       <h1 className="text-2xl font-bold mb-5 mt-4">Admin Dashboard</h1>
       <h2 className="text-xl font-semibold mb-5">{collectionId}</h2>
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card
           title="Contract Information"

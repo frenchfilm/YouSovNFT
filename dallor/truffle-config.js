@@ -7,13 +7,14 @@ module.exports = {
 		// Polygon mumbai testnet
 		mumbai: {
 			provider: () =>
-				new HDWalletProvider({
-					url: process.env.MUMBAI_PROVIDER_URL,
-					privateKeys: [process.env.PRIVATE_KEY]
-				}),
+			new HDWalletProvider({
+				url: process.env.MUMBAI_PROVIDER_URL,
+				privateKeys: [process.env.PRIVATE_KEY]
+			}),
 			network_id: 80001,
+			gasPrice: 50e9, // 50 gwei
 			skipDryRun: false
-		}
+		},
 	},
 	mocha: {
 		timeout: 100000
