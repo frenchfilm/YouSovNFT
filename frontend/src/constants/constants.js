@@ -1,5 +1,5 @@
 export const NFTCollectionFactoryAddress =
-    "0xF4e3BC984eadF5Dd1D3fe021cbF77Cc60a4C7dCd";
+    "0x3cB2Bc206c5303877D70fCBa9897e34ed995BAe3";
 
 export const DUXAddress = "0xD904137530096857eAacfE4D6996052880620509";
 

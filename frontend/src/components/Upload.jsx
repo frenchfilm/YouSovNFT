@@ -35,11 +35,13 @@ function Upload() {
     const [attributes, setAttributes] = useState([]);
 
     const uploadMetadata = async () => {
+        const currentDate = new Date().toISOString().split('T')[0];
+
         const metadata = {
             name,
             description,
             image,
-            attributes,
+            attributes: [...attributes, { trait_type: "MintDate", value: currentDate }],
         };
         const metadatauri = await lighthouse.uploadText(
             JSON.stringify(metadata),
