@@ -8,6 +8,10 @@ contract Dallor is SuperTokenBase, Ownable {
 	/// @notice Thrown when supply limit would be exceeded
 	error SupplyCapped();
 
+	/// @notice Emmited when users are payed
+	event UsersPayed(address[] userAddresses, uint256[] amounts);
+
+
 	/// @notice supply cap
 	uint256 public maxSupply;
 
@@ -68,11 +72,14 @@ contract Dallor is SuperTokenBase, Ownable {
 	/// @notice Pays users according to their pending payments
 	/// @param userToPayList Array of users to pay
 	function payUsers(UserToPay[] memory userToPayList) public onlyOwner {
+		address[] memory addresses = new address[](userToPayList.length);
+		uint256[] memory amounts = new uint256[](userToPayList.length);
 		for (uint256 i = 0; i < userToPayList.length; i++) {
 			transferFromAddressToPay(
 				userToPayList[i].publicAddress,
 				userToPayList[i].pendingPayment
 			);
 		}
+		emit UsersPayed(addresses, amounts);
 	}
 }
